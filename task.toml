@@ -1,0 +1,96 @@
+name = "warranty-claims"
+
+# The verifier reads only these paths from the agent's final environment. Must stay top-level:
+# nested under [verifier] the value is silently dropped and the verifier receives nothing.
+artifacts = [
+    "/app/model/src/",
+    "/app/model/build.sh",
+    "/app/data/",
+    "/app/out/",
+]
+
+[metadata]
+author_name = "anonymous"
+author_email = "anonymous"
+category = "ML"
+subcategory = "Training"
+tags = ["c", "truncated-regression", "selection-bias", "heteroskedasticity", "maximum-likelihood"]
+languages = ["c"]
+difficulty = "core"
+expert_time_estimate_hours = 5
+
+difficulty_explanation = """
+Every claim in history.dat cleared a dealer deductible of about GBP 1050, because a job worth less than that is carried by the dealer and never filed with the manufacturer at all. Nothing shipped with the task says so. The data dictionary says only that a row exists because a dealer invoiced for the job and that franchise terms decide which jobs reach the ledger at all, so the cut has to be found in the data rather than read: the settled costs stop dead at 1050 with a pile-up against it, 60 of the 4200 rows within five pounds. The data dictionary deliberately does not name the deductible or its consequence: a dictionary that spelled either one out would turn the first half of the task into transcription rather than a diagnosis. The cut is on the cost itself, which is the thing being modelled, and not on any of the columns sitting beside it. That distinction is the whole task. Selection on a covariate is harmless, the conditional mean survives it untouched, and an agent that classifies this as "the sample is filtered, but the filter is a feature I can condition on" reaches exactly the wrong conclusion. Selection on the outcome truncates the error: the residuals that survive are the upper tail of their own distribution, so least squares comes back with a flattened slope and a lifted intercept, and the audit batch is scored against a line fitted to a population it does not belong to.
+
+Seeing that is necessary and it is not sufficient, and the second half is what the task now turns on. The spread of the residuals is not constant: a fifteen-hour job does not miss by the same money as a three-hour one, and the sd rises with the labour booked. On an untruncated sample that would cost nothing, because least squares stays unbiased under heteroskedasticity and it is only the standard errors that suffer. Here the two features interact. How far a filed claim has to be pushed back down to undo the truncation is set by the spread AT THAT ROW, so a truncated likelihood carrying one pooled sigma corrects the small jobs and the large ones by the same amount and gets both wrong. The textbook truncated-normal regression, implemented perfectly, scores 0.4891 on the shipped batch against a bar of 0.65 — worse than the least squares it was brought in to fix. The same likelihood with a row-dependent sigma scores 0.7576.
+
+That is deliberately the reverse of what the correction is supposed to feel like. An agent that diagnoses the deductible, writes the inverse Mills ratio term correctly and converges cleanly gets a number that is worse than doing nothing, and there is no error in its work to find. The only way through is to check whether the spread it assumed constant actually is.
+
+What makes both halves load-bearing rather than technicalities is that the wrong route defends itself. Split history.dat, fit every way, and score on the held-out part — the only validation the agent can actually run — and PLAIN LEAST SQUARES RANKS FIRST. Measured across four generator seeds: on that split least squares scores 0.4880 to 0.5779, the correct row-spread fit 0.2811 to 0.4490, and the pooled-spread truncated fit is negative. On the audit batch, which is what is graded, the ranking inverts: 0.7451 to 0.7564 for the row-spread fit against 0.4783 to 0.5120 for least squares. The agent's own validation evidence points at the wrong answer, and points hard. There is no contaminated column here and no leaked label, so a provenance sweep finds nothing.
+
+The bar sits between measured routes rather than being chosen by taste. Across four generator seeds the fit that undoes the truncation with a row-dependent spread explains 0.7446 to 0.7576 of the variation in the audited costs. Every route that gets one of the two halves wrong falls well short: the pooled-spread truncated fit reaches 0.4042 to 0.5305, plain least squares 0.4668 to 0.5037, and a spread fitted against the wrong column 0.1744 to 0.5656. The bar is 0.65, the midpoint of that gap: 0.084 above the best reachable wrong route and 0.095 below the worst correct run.
+
+The bar was 0.70 and that was too fine a cut, because a fourth route exists that the original sweep had not covered: a truncated likelihood on LOG cost carrying one constant log-sigma, which makes the spread rise with the fitted level rather than with the booked hours. It reads the second half of the problem off the wrong quantity and scores 0.6604 to 0.6985 on this instance, so a bar at 0.70 would have been decided by a margin of 0.0015 rather than by the correction. At 0.65 the routes that assume a single spread are still 0.084 clear of the bar, the level-driven spread straddles it, and the fit that drives the spread off the booked hours clears it by 0.095.
+
+The correct answer does not depend on guessing the exact spread law. The export's sd is linear in the booked hours; fitting it as exponential in the hours instead scores 0.7446 to 0.7576, fitting it linear scores 0.7452 to 0.7567, and driving it off the fitted mean rather than the hours directly — a coarser but reasonable reading — still scores 0.7205 to 0.7379, all clear of the bar. What fails is assuming there is one spread at all.
+
+The implementation sits on top of the statistics. The correction is a maximum-likelihood fit of a truncated normal, which needs the normal CDF and an iterative optimiser written against libm, with the linear solve underneath it. That is real work, perhaps a hundred and fifty lines, but it is not the difficulty: an agent that writes a flawless optimiser and fits the filed claims untruncated still fails, and so does one that fits them truncated with a single sigma.
+
+Both exports are synthetic, generated by solution/generate_data.py: costs are drawn from a linear model in vehicle age, odometer, booked labour and prior claims with normal noise whose sd is 45 + 30 * booked hours — about 153 on average, so the overall noise level is what a single pooled sd of 150 would give — and history.dat is then truncated at the GBP 1050 deductible while the audit batch is left unfiltered. Synthetic data is what makes the task gradeable at all, because the audited costs have to be known exactly to score against, and it is what makes the trap honest rather than lucky: both cohorts come off the same generative model, spread law included, and the truncation is the only difference between them, so a route that clears the bar has demonstrably corrected for what is there and not for some other artefact of a real export. The generator is shipped, so the calibration numbers above can be re-derived from source. The realism that matters here is structural rather than cosmetic. Four covariates and four thousand two hundred settled claims is a small file by industry standards, but a deductible that keeps small jobs out of the claims ledger is exactly how franchise warranty accounts work, and it is the feature that drives the whole result.
+
+In a real business this job belongs to a warranty reserving analyst, or the pricing actuary they report into, at a vehicle manufacturer or an extended-warranty underwriter. Setting a reserve against an audit batch from a model fitted to previously settled claims is routine work for that role, and the deductible-induced truncation in it is a known and frequently missed hazard in exactly that setting.
+"""
+
+solution_explanation = """
+The reference (solution/solve.sh) installs src/main.c and runs the project's build script. It reads both exports, standardises the four covariates and the cost, and fits by maximum likelihood the model the filed claims actually came from: cost normal about a linear predictor, observed only when it clears the deductible, so each claim contributes its own density less the log probability that the claim would have been filed at all.
+
+The gradient of that likelihood is in closed form, including the inverse Mills ratio term, and the Hessian is taken by differencing the gradient. Newton with a backtracking line search converges in a few dozen iterations. The C standard library provides erfc, which is all the normal CDF needs; the six-by-six solve underneath Newton and the normal equations for the starting least-squares fit share one Gaussian elimination routine with partial pivoting, about thirty lines. Nothing outside libc and libm is used.
+
+The deductible is estimated as the smallest settled cost in history.dat, which is exact to the rounding on a single claim and is the only place it is available, since nothing shipped with the task states the figure. Coefficients are mapped back to the raw columns at the end and the quotes are the linear predictor evaluated on the audit batch, written as whitespace-delimited text.
+
+The spread is fitted alongside the coefficients rather than assumed: the row's sigma is exp(q0 + q1 * u), with u the booked hours over their own mean, and q0 and q1 are two more parameters in the same Newton step. Starting q1 at zero means the fit begins at the pooled-sigma solution and opens it out from there. The exponential form keeps sigma positive without a constraint; the export's spread is close to linear in the hours, and the two parameterisations agree to within 0.001 on the graded batch.
+
+It explains 0.7576 of the variation in the audited costs against the 0.65 bar. Two one-line edits to the same file each drop it below: removing the call to the maximum-likelihood step, so least squares on the filed claims ships as it stands, gives 0.5034 (the oracle_naive_ols arm); pinning the spread to a single sigma, which is the textbook truncated-normal regression, gives 0.4891 (the oracle_pooled_spread arm). Both are needed, and neither is enough.
+"""
+
+verification_explanation = """
+The verifier runs in its own container. It collects the agent's C sources, the build script and the shipped exports as artifacts, recompiles the project with gcc and runs it, so the graded output is always the product of a clean build of the agent's own code. There is no dependency tree here and so no prebuilt binary and no stale-artifact problem: the model is written against libc and libm, and the verifier image carries only gcc and pytest.
+
+Recompiling means the verifier executes code the agent wrote, so that step is not done as root. test.sh hands the project to an unprivileged build user through setpriv with supplementary groups cleared and no-new-privileges set. Each run happens in its own session and its whole process group is torn down afterwards, then every process that user still owns is swept, so nothing the agent started is alive when the reward is written. The program's output is moved to a root-owned path and pytest reads that: pytest never runs the agent's binary itself, which would execute agent code as root in the container that decides the reward. The audited costs are baked into the image at /opt/golden, readable only by root, and the whole /tests mount is closed to the build user before anything untrusted starts. If it is still reachable the run is abandoned with reward 0 rather than graded. pytest runs with -P so the working directory stays off the import path, closing the /app/pytest.py shadow that would otherwise let agent code no-op the suite.
+
+Nine checks run, and every one of them is a requirement instruction.md states. Six grade the shipped batch: both exports unaltered by sha256, the two-column header, one quote per claim with no extras or repeats, finite and positive amounts, quotes that vary rather than being one number repeated, and R squared against the audited costs reaching 0.65.
+
+Three more grade a SECOND run against an audit batch the agent has never seen, baked in at /opt/holdout and never present in any container the agent can reach. test.sh moves the first output aside root-only, swaps /app/data, recompiles and runs the same program again, then restores the agent's exports byte-for-byte so the sha256 check still tests exactly what the agent left. Those three check that it quotes every claim in the batch it was handed, that R squared stays above a slacker 0.50, and that the two runs do not produce an identical set of numbers. The holdout bar is slacker than the graded one and instruction.md now names it, so there is no graded threshold the agent was not told about.
+
+That second batch is drawn under a DIFFERENT set of cost drivers, not merely a different seed, and the reason is measured. A program that carries costs written into its source fails all three checks either way. A program that carries the fitted COEFFICIENTS instead recomputes plausible quotes on whatever file it is handed, so a holdout drawn under the shipped coefficients does not catch it: on the previous same-regime holdout the stored fit scored 0.7815 against the holdout bar, alongside an honest refit's 0.7821, which left the instruction's "it needs to fit whatever is sitting in /app/data" unenforced. The holdout book now puts most of the money on prior claims and mileage rather than on the labour rate; the stored fit scores 0.29 to 0.33 across seeds while an honest truncated-likelihood refit scores 0.75, so only a program that reads history.dat at run time clears the bar. The deductible is unchanged at 1050, so that run still exercises the same correction on the same terms.
+
+The output the agent's build leaves at /app/out/predictions.dat is staged only if it is a regular file: the build runs unprivileged and cannot read /opt/golden, but it could drop a symlink there, and a plain move would preserve it for root-run pytest to dereference. Anything that is not a regular file is discarded and the run counts as having written nothing; the reads in test_outputs.py additionally open O_NOFOLLOW. For the same reason the verifier image's Python interpreters are closed to the build user while the agent's build.sh runs, since the task states the model lives in C and this image ships Python only so that pytest can score the result.
+
+The bar was placed between measured routes. Across four generator seeds the fit that undoes the truncation with a row-dependent spread explains 0.7446 to 0.7576, the same fit carrying one pooled spread 0.4042 to 0.5305, and plain least squares 0.4668 to 0.5037; the bar is 0.65, the midpoint of that gap. It was 0.70 and was moved down after the trials turned up a route the sweep had not covered — a truncated likelihood on log cost with one constant log-sigma, so the spread follows the fitted level rather than the booked hours — which scores 0.6604 to 0.6985 and left the bar being decided by 0.0015 rather than by the correction. The holdout bar moved from 0.60 to 0.50 with it: an honest refit scores 0.7223 there and those same runs 0.5291 to 0.5541, while the stored-coefficient route scores 0.29 to 0.33, so 0.50 keeps a 0.17 margin over the cheat and stays slacker than the graded bar. Two arms make that runnable, and each is the reference with a single edit and nothing else changed. oracle_naive_ols removes the maximum-likelihood call, so least squares on the filed claims ships as it stands, and scores 0. oracle_pooled_spread pins the spread to a single sigma, which is the textbook truncated-normal regression and what the earlier round's trials all wrote, and also scores 0 — both fail the R squared checks while passing every structural one, which is what establishes that neither half of the correction is enough by itself. solution/generate_data.py regenerates the shipped exports byte for byte and solution/generate_holdout.py produces the unseen batch, so the calibration is re-runnable rather than asserted.
+"""
+
+relevant_experience = """
+I authored the fleet predictive-maintenance task accepted into the previous edition of the benchmark and several of the tasks in this one, two of which have been accepted here. The judgement that shaped this one is a result from that batch: the tasks that survive are the ones where the agent's own validation evidence argues for the wrong answer, and the tasks that die are the ones where a provenance sweep or a column-level check exposes the trap in the first minute. An earlier task of mine gave its trap away because it was visible in the marginals of a single column. This design has no such column: the training file is a clean, honest, complete record of the claims that exist, and what is wrong with it is which claims exist at all. I also measured the wrong routes with their hyper-parameters selected the only way the agent could select them, after finding that a route tuned against the answer key cleared a bar that no reachable version of it could reach.
+"""
+
+[verifier]
+# Two compiles and two runs of the agent's program. gcc is fast and there is no dependency tree,
+# so this is comfortable, but 1800 is the floor the platform requires.
+timeout_sec = 1800
+environment_mode = "separate"
+network_mode = "no-network"
+
+[agent]
+timeout_sec = 5400
+# Offline by design: the model is written against libc and libm, and network access would let the
+# agent fetch a statistics library rather than implement the truncated fit.
+network_mode = "no-network"
+
+[environment]
+# Must be "public" on every task, offline ones included: this is the phase where the image is
+# built and the agent harness is installed.
+network_mode = "public"
+build_timeout_sec = 900
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
